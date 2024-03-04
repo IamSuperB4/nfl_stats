@@ -1,68 +1,126 @@
+"""Database helper functions"""
+
+from dataclasses import dataclass
 import os
 from dotenv import load_dotenv
-from pyodbc import drivers
-from sqlalchemy import Engine, create_engine
+from sqlalchemy import URL, Engine, create_engine, engine
+from sqlalchemy.ext.asyncio import (
+    create_async_engine,
+    AsyncEngine,
+    async_sessionmaker,
+    AsyncSession,
+)
 
-def create_sql_server_engine(environment_variable: str, echo: bool = False) -> Engine:
-    connection_string = create_sql_server_connection_string(environment_variable)
-    
-    return create_engine(connection_string, echo=echo)
 
-def create_sql_server_connection_string(environment_variable: str) -> str:
-    """Create a connection string from an environment variable containing a connection string
-        and a SQL Server driver
+@dataclass(frozen=True)
+class DatabaseEnvVariables:
+    """Database Connection class for NFL_Stats database ORM"""
+
+    server: str
+    database: str
+
+
+async def async_create_session_engine(
+    environment_variables: DatabaseEnvVariables, echo: bool = False
+) -> AsyncSession:
+    """Create an async SQLAlchemy engine for connecting to a SQL Server database.
 
     Args:
-        environment_variable (str): environment variable with connection string
+        environment_variables (DatabaseEnvVariables): The database environment variables.
+        echo (bool, optional): Whether to echo SQL statements to the console. Defaults to False.
 
     Returns:
-        str: SQL Server connection string
+        AsyncSession: The async SQLAlchemy engine for connecting to the SQL Server database.
     """
-    # get connection string from environment variable
-    load_dotenv()
-    connection_string = os.getenv(environment_variable)
-
-    driver_name = get_sql_server_driver_name()
-
-    # add driver to connection string
-    connection_string += f"&driver={driver_name}"
-
-    return connection_string
+    async_engine: AsyncEngine = await async_create_sql_server_engine(
+        environment_variables, echo
+    )
+    return async_sessionmaker(async_engine, expire_on_commit=True)
 
 
-def get_sql_server_driver_name() -> str:
-    """Get a SQL Server driver name
+async def async_create_sql_server_engine(
+    environment_variables: DatabaseEnvVariables, echo: bool = False
+) -> AsyncEngine:
+    """Create a SQLAlchemy engine for connecting to a SQL Server database.
+
+    Args:
+        environment_variable (str): The name of the environment variable containing the
+            SQL Server connection string.
+        echo (bool, optional): Whether to echo SQL statements to the console. Defaults to False.
+
+    Returns:
+        Engine: The SQLAlchemy engine for connecting to the SQL Server database.
 
     Raises:
-        DatabaseError: No suitable driver found. Cannot connect to database.
+        DatabaseError: If no suitable SQL Server driver is found.
+    """
+    connection_url: URL = create_sql_server_connection_string(
+        environment_variables, is_async=True
+    )
+
+    return create_async_engine(connection_url, echo=echo)
+
+
+def create_sql_server_engine(
+    environment_variables: DatabaseEnvVariables, echo: bool = False
+) -> Engine:
+    """Create a SQLAlchemy engine for connecting to a SQL Server database.
+
+    Args:
+        environment_variable (str): The name of the environment variable containing the
+            SQL Server connection string.
+        echo (bool, optional): Whether to echo SQL statements to the console. Defaults to False.
 
     Returns:
-        str: first valid SQL Server driver
+        Engine: The SQLAlchemy engine for connecting to the SQL Server database.
+
+    Raises:
+        DatabaseError: If no suitable SQL Server driver is found.
     """
-    # get list of SQL Server drivers available
-    driver_names = [x for x in drivers() if x.endswith(" for SQL Server")]
+    connection_url: URL = create_sql_server_connection_string(environment_variables)
 
-    # if there were valid driver_names returned, use first one
-    if driver_names:
-        driver_name = driver_names[0]
-    # if driver was found
-    if driver_name:
-        return driver_name
+    return create_engine(connection_url, echo=echo)
 
-    raise DatabaseError("No suitable driver found. Cannot connect to database.")
+
+def create_sql_server_connection_string(
+    environment_variables: DatabaseEnvVariables, is_async: bool = False
+) -> URL:
+    """Create a connection string for a SQL Server database from an environment variable.
+
+    Args:
+        environment_variable (str): The name of the environment variable containing the
+            SQL Server connection string.
+
+    Returns:
+        str: The SQL Server connection string.
+    """
+    # Get the connection string from the environment variable
+    load_dotenv()
+    server = os.getenv(environment_variables.server)
+    database = os.getenv(environment_variables.database)
+
+    if is_async:
+        driver_name = "mssql+aioodbc"
+    else:
+        driver_name = "mssql+pyodbc"
+
+    return engine.URL.create(
+        drivername=driver_name,
+        host=server,
+        database=database,
+        query={
+            "driver": "ODBC Driver 18 for SQL Server",
+            "Trusted_Connection": "Yes",
+            "TrustServerCertificate": "Yes",
+        },
+    )
 
 
 class DatabaseError(Exception):
-    """Invalid datatype error
+    """An error occurred with the database."""
 
-    Args:
-        Exception (Exception): Invalid datatype
-    """
-
-    # Constructor or Initializer
     def __init__(self, message):
         self.value = message
 
-    # __str__ is to print() the value
     def __str__(self):
         return repr(self.value)
