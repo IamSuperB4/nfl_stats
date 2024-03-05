@@ -2,7 +2,7 @@
 
 import pandas as pd
 from sqlalchemy import Connection, CursorResult, Select, select
-from data.data import Season
+from data.data import Game, Season, Team
 from database.db_tables import season, division, team, game, game_result
 from database.database_helper import (
     DatabaseEnvVariables,
@@ -10,7 +10,7 @@ from database.database_helper import (
 )
 
 
-async def get_entire_season(season_year: int) -> tuple[Season, pd.DataFrame, pd.DataFrame]:
+async def get_entire_season(season_year: int) -> tuple[Season, list[Team], list[Game]]:
     """
     Adds an entire NFL season to the database.
 
@@ -18,8 +18,8 @@ async def get_entire_season(season_year: int) -> tuple[Season, pd.DataFrame, pd.
         season_year (int): The season year for which the games are required.
 
     Returns:
-        tuple[pd.DataFrame, pd.DataFrame]: A tuple containing two pandas dataframes,
-            the first containing the teams and the second containing the games.
+        tuple[Season, list[Team], list[Game]]: A tuple containing season information,
+            teams, and games.
     """
     engine = await async_create_sql_server_engine(
         DatabaseEnvVariables(server="Local_SQL_Server", database="NFL_Stats"), False
@@ -27,12 +27,12 @@ async def get_entire_season(season_year: int) -> tuple[Season, pd.DataFrame, pd.
 
     async with engine.begin() as db:
         season_info: Season = await get_season_info(db, season_year)
-        teams_df: pd.DataFrame = await get_teams_for_season(db, season_year)
-        games_df: pd.DataFrame = await get_games_for_season(db, season_year)
+        teams: list[Team] = await get_teams_for_season(db, season_year)
+        games: list[Game] = await get_games_for_season(db, season_year)
 
     await engine.dispose()
 
-    return season_info, teams_df, games_df
+    return season_info, teams, games
 
 async def get_season_info(db: Connection, season_year: int) -> Season:
     """
@@ -52,7 +52,7 @@ async def get_season_info(db: Connection, season_year: int) -> Season:
     return Season(*result.one()[1:])
 
 
-async def get_teams_for_season(db: Connection, season_year: int) -> pd.DataFrame:
+async def get_teams_for_season(db: Connection, season_year: int) -> list[Team]:
     """
     This function retrieves all the teams for a given season from the database.
 
@@ -77,10 +77,15 @@ async def get_teams_for_season(db: Connection, season_year: int) -> pd.DataFrame
     )
 
     result: CursorResult = await db.execute(teams_select)
-    return pd.DataFrame(result.fetchall())
+
+    # Fetch all rows from the cursor
+    rows = result.fetchall()
+
+    # Create a list of dataclasses
+    return [Team(*row) for row in rows]
 
 
-async def get_games_for_season(db: Connection, season_year: int) -> pd.DataFrame:
+async def get_games_for_season(db: Connection, season_year: int) -> list[Game]:
     """
     This function retrieves all the games for a given season from the database.
 
@@ -97,7 +102,6 @@ async def get_games_for_season(db: Connection, season_year: int) -> pd.DataFrame
     games_select: Select = (
         select(
             game.columns.Id,
-            game.columns.SeasonId,
             game.columns.Week,
             game.columns.WeekName,
             game.columns.StartTime,
@@ -115,4 +119,9 @@ async def get_games_for_season(db: Connection, season_year: int) -> pd.DataFrame
     )
 
     result: CursorResult = await db.execute(games_select)
-    return pd.DataFrame(result.fetchall())
+
+    # Fetch all rows from the cursor
+    rows = result.fetchall()
+
+    # Create a list of dataclasses
+    return [Game(*row) for row in rows]
